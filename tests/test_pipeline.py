@@ -18,8 +18,17 @@ from win_bg_pipeline.probe import enumerate_windows, probe_window
 # Helper script that spawns a real Win32 Tkinter window in the background (without stealing focus)
 # and changes its canvas background color & label whenever it receives WM_KEYDOWN / WM_CHAR / clicks.
 BG_TEST_APP_CODE = r"""
+import ctypes
 import sys
 import tkinter as tk
+
+try:
+    u32 = ctypes.WinDLL("user32")
+    hdesk = u32.OpenDesktopW("Default", 0, False, 0x10000000)
+    if hdesk:
+        u32.SetThreadDesktop(hdesk)
+except Exception:
+    pass
 
 root = tk.Tk()
 root.title("WinBgPipelineTestTarget")
