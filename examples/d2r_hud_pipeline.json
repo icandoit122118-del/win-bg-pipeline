@@ -1,0 +1,46 @@
+{
+  "name": "d2r-background-ui-capture-pipeline",
+  "target": {
+    "process": "D2R.exe",
+    "class_name": "OsWindow"
+  },
+  "receipt_output": "d2r-pipeline-receipt.json",
+  "steps": [
+    {
+      "type": "probe"
+    },
+    {
+      "type": "capture",
+      "output": "captures/01_clean_hud.png"
+    },
+    {
+      "type": "key",
+      "key": "Q",
+      "hold_sec": 0.08,
+      "verify_visual_change": true,
+      "settle_sec": 0.6
+    },
+    {
+      "type": "capture",
+      "output": "captures/02_quest_log_open.png"
+    },
+    {
+      "type": "key",
+      "key": "Q",
+      "hold_sec": 0.08,
+      "verify_visual_change": true,
+      "settle_sec": 0.5
+    },
+    {
+      "type": "key",
+      "key": "ESC",
+      "hold_sec": 0.08,
+      "verify_visual_change": true,
+      "settle_sec": 0.5
+    },
+    {
+      "type": "capture",
+      "output": "captures/03_tracker_panel.png"
+    }
+  ]
+}
