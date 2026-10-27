@@ -331,6 +331,45 @@ class InputPipeline:
             attempts=attempts,
         )
 
+    def _foreground_click_guarded(self, hwnd: int, x: int, y: int, button: str, hold_sec: float) -> bool:
+        from .win32_api import INPUT_MOUSE, MOUSEINPUT
+        prev_fg = user32.GetForegroundWindow()
+        orig_pt = POINT()
+        user32.GetCursorPos(ctypes.byref(orig_pt))
+        try:
+            user32.SetForegroundWindow(hwnd)
+            time.sleep(0.05)
+
+            target_pt = POINT(x, y)
+            user32.ClientToScreen(hwnd, ctypes.byref(target_pt))
+            user32.SetCursorPos(target_pt.x, target_pt.y)
+            time.sleep(0.03)
+
+            btn = button.lower()
+            if btn == "right":
+                down_flag, up_flag = 0x0008, 0x0010
+            elif btn == "middle":
+                down_flag, up_flag = 0x0020, 0x0040
+            else:
+                down_flag, up_flag = 0x0002, 0x0004  # MOUSEEVENTF_LEFTDOWN / LEFTUP
+
+            inp_down = INPUT()
+            inp_down.type = INPUT_MOUSE
+            inp_down.u.mi = MOUSEINPUT(0, 0, 0, down_flag, 0, 0)
+            user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+            time.sleep(max(0.03, hold_sec))
+
+            inp_up = INPUT()
+            inp_up.type = INPUT_MOUSE
+            inp_up.u.mi = MOUSEINPUT(0, 0, 0, up_flag, 0, 0)
+            sent = user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+            time.sleep(0.03)
+            return sent == 1
+        finally:
+            user32.SetCursorPos(orig_pt.x, orig_pt.y)
+            if prev_fg and prev_fg != hwnd and user32.IsWindow(prev_fg):
+                user32.SetForegroundWindow(prev_fg)
+
     def send_click(
         self,
         hwnd: int,
@@ -339,8 +378,11 @@ class InputPipeline:
         button: str = "left",
         hold_sec: float = 0.05,
         spoof_activate: bool = True,
+        verify_visual_change: bool = False,
+        settle_sec: float = 0.4,
+        diff_threshold: float = 0.002,
     ) -> InputResult:
-        """Send a background client-coordinate mouse click via PostMessageW."""
+        """Send a client-coordinate mouse click via PostMessageW, falling back to guarded SendInput if needed."""
         if not user32.IsWindow(hwnd):
             raise ValueError(f"Invalid HWND: {hwnd}")
 
@@ -362,6 +404,12 @@ class InputPipeline:
                 ],
             )
 
+        before_bgra = b""
+        if verify_visual_change:
+            cap_before = self.capture_pipeline.capture(hwnd)
+            if cap_before.success:
+                before_bgra = cap_before.bgra_bytes
+
         t0 = time.perf_counter()
         if spoof_activate:
             self._spoof_focus(hwnd)
@@ -381,20 +429,79 @@ class InputPipeline:
         ok2 = bool(user32.PostMessageW(hwnd, up_msg, 0, lparam))
         elapsed = round((time.perf_counter() - t0) * 1000.0, 2)
 
+        attempts: list[InputStageAttempt] = []
+        diff_ratio = 0.0
+        verified = False
+        if verify_visual_change and before_bgra:
+            time.sleep(max(0.05, settle_sec))
+            cap_after = self.capture_pipeline.capture(hwnd)
+            if cap_after.success:
+                diff_ratio = compute_frame_diff_ratio(before_bgra, cap_after.bgra_bytes)
+                verified = diff_ratio >= diff_threshold
+
+        attempts.append(
+            InputStageAttempt(
+                stage_name="postmessage_activate_spoof" if spoof_activate else "postmessage_wndproc",
+                dispatched=ok1 and ok2,
+                elapsed_ms=elapsed,
+                visual_diff_ratio=diff_ratio if verify_visual_change else None,
+                verified_effect=verified if verify_visual_change else None,
+                notes=f"Sent WM_MOUSEMOVE + button down/up at client ({x}, {y})",
+            )
+        )
+
+        if (ok1 and ok2) and (not verify_visual_change or verified):
+            return InputResult(
+                success=True,
+                hwnd=hwnd,
+                action=f"click:{button}@({x},{y})",
+                winning_stage="postmessage_activate_spoof" if spoof_activate else "postmessage_wndproc",
+                uipi_blocked=False,
+                visual_diff_ratio=diff_ratio if verify_visual_change else None,
+                attempts=attempts,
+            )
+
+        if self.allow_foreground_fallback:
+            t1 = time.perf_counter()
+            fg_ok = self._foreground_click_guarded(hwnd, x, y, button, hold_sec)
+            fg_elapsed = round((time.perf_counter() - t1) * 1000.0, 2)
+            fg_diff = 0.0
+            fg_verified = True
+            if verify_visual_change and before_bgra:
+                time.sleep(max(0.05, settle_sec))
+                cap_after2 = self.capture_pipeline.capture(hwnd)
+                if cap_after2.success:
+                    fg_diff = compute_frame_diff_ratio(before_bgra, cap_after2.bgra_bytes)
+                    fg_verified = fg_diff >= diff_threshold
+            attempts.append(
+                InputStageAttempt(
+                    stage_name="foreground_sendinput_restore_guard",
+                    dispatched=fg_ok,
+                    elapsed_ms=fg_elapsed,
+                    visual_diff_ratio=fg_diff if verify_visual_change else None,
+                    verified_effect=fg_verified if verify_visual_change else None,
+                    notes=f"Guarded foreground cursor move + SendInput click at client ({x}, {y}) + restore",
+                )
+            )
+            if fg_ok and fg_verified:
+                return InputResult(
+                    success=True,
+                    hwnd=hwnd,
+                    action=f"click:{button}@({x},{y})",
+                    winning_stage="foreground_sendinput_restore_guard",
+                    uipi_blocked=False,
+                    visual_diff_ratio=fg_diff if verify_visual_change else None,
+                    attempts=attempts,
+                )
+
         return InputResult(
-            success=ok1 and ok2,
+            success=(ok1 and ok2) and not verify_visual_change,
             hwnd=hwnd,
             action=f"click:{button}@({x},{y})",
-            winning_stage="postmessage_activate_spoof" if spoof_activate else "postmessage_wndproc",
+            winning_stage=None,
             uipi_blocked=False,
-            attempts=[
-                InputStageAttempt(
-                    stage_name="postmessage_activate_spoof" if spoof_activate else "postmessage_wndproc",
-                    dispatched=ok1 and ok2,
-                    elapsed_ms=elapsed,
-                    notes=f"Sent WM_MOUSEMOVE + button down/up at client ({x}, {y})",
-                )
-            ],
+            visual_diff_ratio=diff_ratio if verify_visual_change else None,
+            attempts=attempts,
         )
 
     def send_text(self, hwnd: int, text: str, char_delay_sec: float = 0.015) -> InputResult:

@@ -6,4 +6,6 @@ dist/
 build/
 .pytest_cache/
 captures/
+examples/captures/
+.elevated_ipc/
 *-receipt.json

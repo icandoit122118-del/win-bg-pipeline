@@ -222,8 +222,18 @@ class CapturePipeline:
             raise ValueError(f"Invalid HWND: {hwnd}")
 
         if user32.IsIconic(hwnd) and self.auto_unminimize_noactivate:
-            user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-            time.sleep(0.12)
+            from .win32_api import SW_RESTORE
+            prev_fg = user32.GetForegroundWindow()
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            # Also send WM_SYSCOMMAND(SC_RESTORE = 0xF120) for game windows that ignore ShowWindow
+            user32.PostMessageW(hwnd, 0x0112, 0xF120, 0)
+            for _ in range(15):
+                time.sleep(0.05)
+                if not user32.IsIconic(hwnd):
+                    break
+            time.sleep(0.15)
+            if prev_fg and prev_fg != hwnd and user32.IsWindow(prev_fg):
+                user32.SetForegroundWindow(prev_fg)
 
         rc = RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rc))

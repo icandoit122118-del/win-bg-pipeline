@@ -1,0 +1,27 @@
+{
+  "name": "maplestory-background-pipeline-verification",
+  "target": {
+    "class_name": "MapleStoryClass"
+  },
+  "receipt_output": "maple-pipeline-receipt.json",
+  "steps": [
+    {
+      "type": "probe"
+    },
+    {
+      "type": "capture",
+      "output": "captures/maple_01_before_input.png"
+    },
+    {
+      "type": "key",
+      "key": "ENTER",
+      "hold_sec": 0.08,
+      "verify_visual_change": true,
+      "settle_sec": 0.5
+    },
+    {
+      "type": "capture",
+      "output": "captures/maple_02_after_input.png"
+    }
+  ]
+}

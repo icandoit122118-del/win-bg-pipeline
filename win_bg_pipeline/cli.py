@@ -116,11 +116,53 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "capture":
         out_abs = os.path.abspath(args.out)
         os.makedirs(os.path.dirname(out_abs), exist_ok=True)
+        report = probe_window(cand.hwnd)
+        if report.uipi_blocked and orch.auto_elevate_on_uipi:
+            receipt = orch.run_pipeline(
+                {
+                    "name": "cli-elevated-capture",
+                    "target": {"hwnd": cand.hwnd},
+                    "steps": [{"type": "capture", "output": out_abs}],
+                }
+            )
+            step_res = receipt["steps"][0]["result"]
+            step_res["elevatedViaRunAs"] = True
+            print(json.dumps(step_res, ensure_ascii=False, indent=2))
+            return 0 if step_res["success"] else 1
         res = orch.capture_pipeline.capture(cand.hwnd, output_png=out_abs)
         print(json.dumps(res.to_dict(), ensure_ascii=False, indent=2))
         return 0 if res.success else 1
 
     if args.cmd == "input":
+        report = probe_window(cand.hwnd)
+        if report.uipi_blocked and orch.auto_elevate_on_uipi:
+            if args.key:
+                step = {"type": "key", "key": args.key, "char": args.char, "verify_visual_change": args.verify}
+            elif args.text:
+                step = {"type": "text", "text": args.text}
+            elif args.click:
+                parts = [int(p.strip()) for p in args.click.split(",")]
+                step = {
+                    "type": "click",
+                    "x": parts[0],
+                    "y": parts[1],
+                    "button": args.button,
+                    "verify_visual_change": args.verify,
+                }
+            else:
+                parser.error("Specify one of --key, --text, or --click")
+                return 2
+            receipt = orch.run_pipeline(
+                {
+                    "name": "cli-elevated-input",
+                    "target": {"hwnd": cand.hwnd},
+                    "steps": [step],
+                }
+            )
+            step_res = receipt["steps"][0]["result"]
+            step_res["elevatedViaRunAs"] = True
+            print(json.dumps(step_res, ensure_ascii=False, indent=2))
+            return 0 if step_res["success"] else 1
         if args.key:
             res = orch.input_pipeline.send_key(
                 cand.hwnd,
@@ -137,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                 x=parts[0],
                 y=parts[1],
                 button=args.button,
+                verify_visual_change=args.verify,
             )
         else:
             parser.error("Specify one of --key, --text, or --click")

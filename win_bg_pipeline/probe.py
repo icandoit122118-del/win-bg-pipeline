@@ -27,6 +27,7 @@ from .win32_api import (
     advapi32,
     dwmapi,
     kernel32,
+    shell32,
     user32,
 )
 
@@ -132,13 +133,11 @@ def get_class_name(hwnd: int) -> str:
 def is_process_elevated(pid: int | None = None) -> bool | None:
     """Return True if target process (or current process when pid=None) is elevated."""
     if pid is None:
-        h_proc = kernel32.GetCurrentProcess()
-        close_proc = False
-    else:
-        h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not h_proc:
-            return None
-        close_proc = True
+        return bool(shell32.IsUserAnAdmin())
+    h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h_proc:
+        return None
+    close_proc = True
 
     try:
         h_token = wintypes.HANDLE()

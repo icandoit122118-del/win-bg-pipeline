@@ -8,9 +8,34 @@ gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+
+shell32.IsUserAnAdmin.argtypes = []
+shell32.IsUserAnAdmin.restype = wintypes.BOOL
+shell32.ShellExecuteW.argtypes = [
+    wintypes.HWND,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    ctypes.c_int,
+]
+shell32.ShellExecuteW.restype = wintypes.HINSTANCE
 
 try:
     user32.SetProcessDPIAware()
+except Exception:
+    pass
+
+# Attach to the interactive 'Default' desktop when launched from a service/sandboxed session
+try:
+    user32.OpenDesktopW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    user32.OpenDesktopW.restype = wintypes.HANDLE
+    user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
+    user32.SetThreadDesktop.restype = wintypes.BOOL
+    _hdesk = user32.OpenDesktopW("Default", 0, False, 0x10000000)
+    if _hdesk:
+        user32.SetThreadDesktop(_hdesk)
 except Exception:
     pass
 
